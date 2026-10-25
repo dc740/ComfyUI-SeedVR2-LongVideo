@@ -60,7 +60,8 @@ def load_attention():
     """Return the compiled extension module (has ``attn(q, k, v, scale)``) or None.
 
     q/k/v are [B, H, S, D] fp16 CUDA tensors; Sq may differ from Skv, and D must
-    be <=64 and a multiple of 8, or exactly 128 (SeedVR2 head_dim).
+    be <=64 and a multiple of 8, or exactly 128 (SeedVR2 DiT head_dim), or
+    exactly 512 (SeedVR2 VAE mid-block channels).
     Returns None off gfx906, on build failure, or after the first attempt.
     """
     global _module, _attempted
