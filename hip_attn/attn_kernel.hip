@@ -4,6 +4,12 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 
+// packed-fp16 dot path is the shipped default; -DGFX906_NO_DOT2 falls back to
+// the scalar fma_mix inner loops (identical math, more instructions).
+#if !defined(GFX906_NO_DOT2) && !defined(USE_DOT2)
+#define USE_DOT2 1
+#endif
+
 #ifndef TILE_M
 #define TILE_M 64
 #endif
@@ -31,6 +37,15 @@
 #define D2 (DMAX / 2)
 
 using H2 = __half2;
+
+#ifdef USE_DOT2
+// 2 fp16 muls + fp32 acc in one issue. ~13% faster on the pair kernels
+// (D=64/128: fewer per-key instrs before the split-lane reduction), ~2% on
+// the D=512 key-per-lane path (LDS-bound).
+static __device__ __forceinline__ float dot2(float acc, H2 a, H2 b) {
+    return __builtin_amdgcn_fdot2(a, b, acc, false);
+}
+#endif
 
 static __device__ __forceinline__ float p2f(PTYPE x) {
     if constexpr (sizeof(PTYPE) == 2) return __half2float(x); else return x;
@@ -97,6 +112,12 @@ attn_tiled_gfx906(
                 #pragma unroll
                 for (int d2 = 0; d2 < D2; d2 += 4) {
                     if (d2 * 2 < de) {
+#ifdef USE_DOT2
+                        a0 = dot2(a0, qreg[d2],     sK[i][d2]);
+                        a1 = dot2(a1, qreg[d2 + 1], sK[i][d2 + 1]);
+                        a2 = dot2(a2, qreg[d2 + 2], sK[i][d2 + 2]);
+                        a3 = dot2(a3, qreg[d2 + 3], sK[i][d2 + 3]);
+#else
                         float2 k0 = __half22float2(sK[i][d2]);
                         float2 k1 = __half22float2(sK[i][d2 + 1]);
                         float2 k2 = __half22float2(sK[i][d2 + 2]);
@@ -109,6 +130,7 @@ attn_tiled_gfx906(
                         a1 += q1.x * k1.x + q1.y * k1.y;
                         a2 += q2.x * k2.x + q2.y * k2.y;
                         a3 += q3.x * k3.x + q3.y * k3.y;
+#endif
                     }
                 }
                 float sc = (a0 + a1 + a2 + a3) * scale;
@@ -226,6 +248,12 @@ attn_pair_gfx906(
                 #pragma unroll
                 for (int d2 = 0; d2 < DQ; d2 += 4) {
                     int d2h = sub * DQ + d2;
+#ifdef USE_DOT2
+                    a0 = dot2(a0, qreg[d2],     sK[i][d2h]);
+                    a0 = dot2(a0, qreg[d2 + 2], sK[i][d2h + 2]);
+                    a1 = dot2(a1, qreg[d2 + 1], sK[i][d2h + 1]);
+                    a1 = dot2(a1, qreg[d2 + 3], sK[i][d2h + 3]);
+#else
                     float2 k0 = __half22float2(sK[i][d2h]);
                     float2 k1 = __half22float2(sK[i][d2h + 1]);
                     float2 k2 = __half22float2(sK[i][d2h + 2]);
@@ -236,6 +264,7 @@ attn_pair_gfx906(
                     float2 q3 = __half22float2(qreg[d2 + 3]);
                     a0 += q0.x * k0.x + q0.y * k0.y + q2.x * k2.x + q2.y * k2.y;
                     a1 += q1.x * k1.x + q1.y * k1.y + q3.x * k3.x + q3.y * k3.y;
+#endif
                 }
                 sP[row][i][sub] = a0 + a1;
             }
@@ -256,6 +285,12 @@ attn_pair_gfx906(
                 #pragma unroll
                 for (int d2 = 0; d2 < DQ; d2 += 4) {
                     int d2h = sub * DQ + d2;
+#ifdef USE_DOT2
+                    a0 = dot2(a0, qreg[d2],     sK[i][d2h]);
+                    a0 = dot2(a0, qreg[d2 + 2], sK[i][d2h + 2]);
+                    a1 = dot2(a1, qreg[d2 + 1], sK[i][d2h + 1]);
+                    a1 = dot2(a1, qreg[d2 + 3], sK[i][d2h + 3]);
+#else
                     float2 k0 = __half22float2(sK[i][d2h]);
                     float2 k1 = __half22float2(sK[i][d2h + 1]);
                     float2 k2 = __half22float2(sK[i][d2h + 2]);
@@ -266,6 +301,7 @@ attn_pair_gfx906(
                     float2 q3 = __half22float2(qreg[d2 + 3]);
                     a0 += q0.x * k0.x + q0.y * k0.y + q2.x * k2.x + q2.y * k2.y;
                     a1 += q1.x * k1.x + q1.y * k1.y + q3.x * k3.x + q3.y * k3.y;
+#endif
                 }
                 float pd = a0 + a1;
                 #pragma unroll
@@ -385,6 +421,12 @@ attn_d512_gfx906(
                 float a0 = 0.f, a1 = 0.f, a2 = 0.f, a3 = 0.f;
                 #pragma unroll 4
                 for (int d2 = 0; d2 < DQ; d2 += 4) {
+#ifdef USE_DOT2
+                    a0 = dot2(a0, sQ[row][d2],     sKV[sub][d2]);
+                    a1 = dot2(a1, sQ[row][d2 + 1], sKV[sub][d2 + 1]);
+                    a2 = dot2(a2, sQ[row][d2 + 2], sKV[sub][d2 + 2]);
+                    a3 = dot2(a3, sQ[row][d2 + 3], sKV[sub][d2 + 3]);
+#else
                     float2 k0 = __half22float2(sKV[sub][d2]);
                     float2 k1 = __half22float2(sKV[sub][d2 + 1]);
                     float2 k2 = __half22float2(sKV[sub][d2 + 2]);
@@ -397,6 +439,7 @@ attn_d512_gfx906(
                     a1 += q1f.x * k1.x + q1f.y * k1.y;
                     a2 += q2f.x * k2.x + q2f.y * k2.y;
                     a3 += q3f.x * k3.x + q3f.y * k3.y;
+#endif
                 }
                 sc = (a0 + a1 + a2 + a3) * scale;
             } else {
