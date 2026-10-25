@@ -170,6 +170,8 @@ class SeedVR2BatchOverlapIn:
     def apply(self, images, meta_batch, overlap_frames, unique_id=None, prompt=None):
         k = max(0, int(overlap_frames))
         requeue = _batch_requeue_index(meta_batch, prompt)
+        if requeue > 0:
+            torch.cuda.empty_cache()
 
         if not hasattr(meta_batch, "_seedvr2_lv_state"):
             meta_batch._seedvr2_lv_state = {}
