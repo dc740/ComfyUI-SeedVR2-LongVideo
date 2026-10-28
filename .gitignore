@@ -1,0 +1,5 @@
+.session-state
+.aider*
+.pi/
+__pycache__/
+*.o
