@@ -21,7 +21,7 @@ import urllib.request
 import uuid
 from fractions import Fraction
 
-SECTION_SECONDS = 60
+SECTION_SECONDS = 20
 WARMUP_FRAMES = 16
 FUTURE_FRAMES = 8
 START_SECTION = 0

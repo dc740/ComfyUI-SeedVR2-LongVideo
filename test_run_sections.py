@@ -28,16 +28,17 @@ class SectionTests(unittest.TestCase):
         fps = Fraction(30000, 1001)
         parts = sections.sections(4000, fps)
         self.assertEqual([(p["start"], p["end"]) for p in parts],
-                         [(0, 1798), (1798, 3596), (3596, 4000)])
-        self.assertEqual((parts[1]["load_start"], parts[1]["load_end"]), (1782, 3604))
+                         [(0, 599), (599, 1198), (1198, 1797), (1797, 2396),
+                          (2396, 2995), (2995, 3594), (3594, 4000)])
+        self.assertEqual((parts[1]["load_start"], parts[1]["load_end"]), (583, 1206))
         self.assertEqual(parts[-1]["load_end"], 4000)
 
     def test_prompt_uses_range_and_preserves_original(self):
         template = prompt()
         part = sections.sections(4000, Fraction(30000, 1001))[1]
         result = sections.section_prompt(template, part, "job/part", Path("source.mov"))
-        self.assertEqual(result["2"]["inputs"]["skip_first_frames"], 1782)
-        self.assertEqual(result["2"]["inputs"]["frame_load_cap"], 1822)
+        self.assertEqual(result["2"]["inputs"]["skip_first_frames"], 583)
+        self.assertEqual(result["2"]["inputs"]["frame_load_cap"], 623)
         self.assertEqual(result["1"]["inputs"]["video"], "source.mov")
         self.assertEqual(result["3"]["inputs"]["filename_prefix"], "job/part")
         self.assertTrue(result["3"]["inputs"]["save_output"])
@@ -45,7 +46,7 @@ class SectionTests(unittest.TestCase):
         self.assertEqual(template["2"]["inputs"]["skip_first_frames"], 0)
 
     def test_out_of_order_checkpoints_do_not_skip_missing_sections(self):
-        parts = sections.sections(10000, Fraction(30))
+        parts = sections.sections(4000, Fraction(30))
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             part = parts[4]
@@ -55,7 +56,7 @@ class SectionTests(unittest.TestCase):
             with mock.patch.object(sections, "validate_video"):
                 pending = [p["index"] for p in parts
                            if not sections.completed(folder, p, Fraction(30))]
-            self.assertEqual(pending, [0, 1, 2, 3, 5])
+            self.assertEqual(pending, [0, 1, 2, 3, 5, 6])
 
     def test_incomplete_or_missing_video_is_not_a_checkpoint(self):
         part = sections.sections(100, Fraction(30))[0]
@@ -173,7 +174,7 @@ class SectionTests(unittest.TestCase):
             assemble.assert_called_once()
 
     def test_assembly_trims_context_and_maps_original_audio(self):
-        parts = sections.sections(2000, Fraction(30))
+        parts = sections.sections(800, Fraction(30))
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             for part in parts:
