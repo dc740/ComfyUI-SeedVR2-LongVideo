@@ -24,6 +24,53 @@ A 30-second clip and a 30-minute clip can therefore use the same VRAM settings; 
 
 The result is a duration-independent VRAM workflow: practical limits are primarily **render time and disk space**, not total source length.
 
+## Resumable sections
+
+`run_sections.py` submits an API-format version of this workflow through ComfyUI
+proxy endpoints. It renders fixed-length sections independently, keeps ProRes
+intermediates and verifies each section before recording it as complete. After a
+restart, incomplete sections are run again; completed sections are checked
+individually, even if they finished out of order.
+
+Set `SECTION_SECONDS`, `START_SECTION`, `END_SECTION` and `WORKER_URLS` at the
+top of the script for each machine. A worker URL must point to a ComfyUI proxy,
+not directly to a managed ComfyUI instance. One worker is used per URL. The
+section range is zero-based and half-open: for example, `[0, 9)` and `[9, 18)`
+do not overlap. Each worker on a machine must use that machine's shared ComfyUI
+output directory, and the source must be in its ComfyUI input directory.
+
+```sh
+# The prompt can be an API-format JSON file or the existing API submitter script.
+python run_sections.py --source INPUT --prompt PROMPT --output-root OUTPUT --plan
+python run_sections.py --source INPUT --prompt PROMPT --output-root OUTPUT
+```
+
+The plan prints exact source-frame ranges and includes warmup and future context
+at each boundary. No media is uploaded by this script. Each machine must use the
+same source contents, API prompt and section settings. Source contents and
+rendering settings identify the job; changing them creates a separate job.
+`--start-section`, `--end-section` and repeated `--worker` options can override
+the defaults without modifying a deployed checkout. When machines share output
+storage, it must support advisory file locks.
+
+To assemble sections rendered on separate machines, copy their completed
+`section-*.json` files **and the videos referenced by those files** into the
+same `OUTPUT/seedvr-sections/<job-id>/` directory. Preserve their relative
+paths; do not overwrite existing files. Then run:
+
+```sh
+python run_sections.py --source INPUT --prompt PROMPT --output-root OUTPUT \
+    --assemble-only --final OUTPUT_VIDEO.mkv
+```
+
+Assembly checks every section, removes its context frames using frame-aligned
+ProRes stream copy, concatenates the video and copies the original audio. It
+does not replace an existing final output. If an earlier controller stopped
+while a section was still running, wait for the ComfyUI queue to clear before
+restarting it; a section without a completion record is rendered again. Partial
+files are left in place rather than deleted. Join quality at section boundaries
+should be checked on a short representative job before a long render.
+
 ## Default output
 
 The included workflow is configured for a practical high-quality delivery file:
