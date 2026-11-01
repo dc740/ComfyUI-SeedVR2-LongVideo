@@ -28,6 +28,7 @@ START_SECTION = 0
 END_SECTION = None  # Exclusive; None means the end of the video.
 WORKER_URLS = []  # ComfyUI proxy URLs for this machine.
 POLL_SECONDS = 10
+HTTP_TIMEOUT_SECONDS = 660
 
 
 def run(*args):
@@ -116,7 +117,7 @@ def request(base, path, data=None):
     body = None if data is None else json.dumps(data).encode()
     req = urllib.request.Request(base.rstrip("/") + path, data=body,
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as response:
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as response:
         return json.load(response)
 
 
